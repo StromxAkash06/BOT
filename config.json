@@ -1,7 +1,7 @@
 {
   "host": "delhi-871920.indernos.in",
   "port": 25565,
-  "username": "AFK_Bot",
+  "username": "Strom_me",
   "password": "",
   "auth": "offline",
   "version": "1.20.1",
@@ -12,7 +12,7 @@
   "chatLogging": true,
   "autoChatReply": false,
   "chatReplyTrigger": "hi",
-  "chatReplyMessage": "Hello! I am an AFK bot.",
+  "chatReplyMessage": "Hello!",
   "randomChatEnabled": true,
   "randomChatIntervalMin": 80000,
   "randomChatIntervalMax": 90000,
