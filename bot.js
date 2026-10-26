@@ -1,7 +1,6 @@
 /**
- * Minecraft 24/7 AFK Bot
- * Author: Kanha
- * Anti-AFK movement + auto-reconnect + random chat
+ * Minecraft Multi-Server AFK Bot
+ * Connects to 2+ servers simultaneously
  */
 
 const mineflayer = require('mineflayer');
@@ -18,231 +17,240 @@ try {
   process.exit(1);
 }
 
-// ── State ──
-let bot;
-let reconnectTimer = null;
-let moveTimer = null;
-let chatTimer = null;
-let isShuttingDown = false;
+if (!config.servers || !Array.isArray(config.servers) || config.servers.length === 0) {
+  console.error('❌ config.json must have "servers" array with at least one server.');
+  process.exit(1);
+}
 
 // ── Logging helper ──
-function log(msg) {
+function log(tag, msg) {
   const time = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  console.log(`[${time}] ${msg}`);
+  console.log(`[${time}] [${tag}] ${msg}`);
 }
 
-// ── Connect ──
-function createBot() {
-  if (isShuttingDown) return;
-
-  log('🔌 Connecting to ' + config.host + ':' + config.port + ' as ' + config.username + '...');
-
-  try {
-    bot = mineflayer.createBot({
-      host: config.host,
-      port: config.port,
-      username: config.username,
-      password: config.password || undefined,
-      auth: config.auth || 'offline',
-      version: config.version || false,
-      hideErrors: false,
-      closeTimeout: 60000,
-      checkTimeoutInterval: 60000
-    });
-  } catch (err) {
-    log('❌ Failed to create bot: ' + err.message);
-    scheduleReconnect();
-    return;
+// ── Bot class per server ──
+class ServerBot {
+  constructor(cfg) {
+    this.cfg = cfg;
+    this.tag = cfg.name || cfg.host;
+    this.bot = null;
+    this.reconnectTimer = null;
+    this.moveTimer = null;
+    this.chatTimer = null;
+    this.isShuttingDown = false;
   }
 
-  // ── Spawn ──
-  bot.once('spawn', () => {
-    log('✅ Bot spawned in server!');
-    setTimeout(() => {
-      startAntiAFK();
-      startRandomChat();
-    }, config.spawnWarmup || 5000);
-  });
+  createBot() {
+    if (this.isShuttingDown) return;
 
-  // ── Kicked ──
-  bot.on('kicked', (reason) => {
-    let r = reason;
-    try {
-      r = typeof reason === 'string' ? reason : JSON.stringify(reason);
-    } catch (_) {}
-    log('⚠️  Kicked: ' + r);
-    scheduleReconnect();
-  });
-
-  // ── Error ──
-  bot.on('error', (err) => {
-    log('❌ Error: ' + (err && err.message ? err.message : err));
-  });
-
-  // ── Disconnect ──
-  bot.on('end', (reason) => {
-    log('🔌 Disconnected: ' + (reason || 'unknown'));
-    stopAntiAFK();
-    stopRandomChat();
-    scheduleReconnect();
-  });
-
-  // ── Chat ──
-  if (config.chatLogging) {
-    bot.on('chat', (username, message) => {
-      if (username === bot.username) return;
-      log(`💬 [Chat] ${username}: ${message}`);
-
-      if (config.autoChatReply && message.toLowerCase().includes(config.chatReplyTrigger)) {
-        bot.chat(`${username}, ${config.chatReplyMessage}`);
-      }
-    });
-  }
-
-  // ── Login ──
-  bot.on('login', () => {
-    log('🔑 Logged in.');
-  });
-}
-
-// ── Reconnect ──
-function scheduleReconnect() {
-  if (isShuttingDown) return;
-  if (reconnectTimer) return;
-
-  const delay = config.reconnectDelay || 10000;
-  log(`⏳ Reconnecting in ${delay / 1000}s...`);
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    createBot();
-  }, delay);
-}
-
-// ── Anti-AFK ──
-function startAntiAFK() {
-  stopAntiAFK();
-
-  const min = config.moveIntervalMin || 5000;
-  const max = config.moveIntervalMax || 10000;
-
-  const loop = () => {
-    if (!bot || !bot.entity) return;
+    log(this.tag, `🔌 Connecting to ${this.cfg.host}:${this.cfg.port} as ${this.cfg.username}...`);
 
     try {
-      const actions = ['forward', 'back', 'left', 'right', 'jump'];
-      const action = actions[Math.floor(Math.random() * actions.length)];
+      this.bot = mineflayer.createBot({
+        host: this.cfg.host,
+        port: this.cfg.port,
+        username: this.cfg.username,
+        password: this.cfg.password || undefined,
+        auth: this.cfg.auth || 'offline',
+        version: this.cfg.version || false,
+        hideErrors: false,
+        closeTimeout: 60000,
+        checkTimeoutInterval: 60000
+      });
+    } catch (err) {
+      log(this.tag, '❌ Failed to create bot: ' + err.message);
+      this.scheduleReconnect();
+      return;
+    }
 
-      bot.setControlState(action, true);
+    // ── Spawn ──
+    this.bot.once('spawn', () => {
+      log(this.tag, '✅ Bot spawned!');
       setTimeout(() => {
-        if (bot && bot.entity) {
-          bot.setControlState(action, false);
-        }
-      }, 800 + Math.random() * 800);
+        this.startAntiAFK();
+        this.startRandomChat();
+      }, config.spawnWarmup || 5000);
+    });
 
-      const yaw = Math.random() * Math.PI * 2;
-      const pitch = (Math.random() - 0.5) * (Math.PI / 3);
-      bot.look(yaw, pitch, false).catch(() => {});
+    // ── Kicked ──
+    this.bot.on('kicked', (reason) => {
+      let r = reason;
+      try { r = typeof reason === 'string' ? reason : JSON.stringify(reason); } catch (_) {}
+      log(this.tag, '⚠️  Kicked: ' + r);
+      this.scheduleReconnect();
+    });
 
-      log(`🏃 Action: ${action}`);
-    } catch (err) {
-      log('⚠️  Movement error: ' + err.message);
+    // ── Error ──
+    this.bot.on('error', (err) => {
+      log(this.tag, '❌ Error: ' + (err && err.message ? err.message : err));
+    });
+
+    // ── Disconnect ──
+    this.bot.on('end', (reason) => {
+      log(this.tag, '🔌 Disconnected: ' + (reason || 'unknown'));
+      this.stopAntiAFK();
+      this.stopRandomChat();
+      this.scheduleReconnect();
+    });
+
+    // ── Chat ──
+    if (config.chatLogging) {
+      this.bot.on('chat', (username, message) => {
+        if (username === this.bot.username) return;
+        log(this.tag, `💬 [Chat] ${username}: ${message}`);
+      });
     }
 
-    const nextDelay = min + Math.random() * (max - min);
-    moveTimer = setTimeout(loop, nextDelay);
-  };
-
-  moveTimer = setTimeout(loop, min);
-  log('🚀 Anti-AFK started.');
-}
-
-function stopAntiAFK() {
-  if (moveTimer) {
-    clearTimeout(moveTimer);
-    moveTimer = null;
-  }
-}
-
-// ── Random Chat ──
-function startRandomChat() {
-  stopRandomChat();
-
-  if (!config.randomChatEnabled) return;
-  if (!config.chatMessages || config.chatMessages.length === 0) {
-    log('⚠️  Random chat enabled but no messages configured.');
-    return;
+    // ── Login ──
+    this.bot.on('login', () => {
+      log(this.tag, '🔑 Logged in.');
+    });
   }
 
-  const min = config.randomChatIntervalMin || 80000;
-  const max = config.randomChatIntervalMax || 90000;
+  scheduleReconnect() {
+    if (this.isShuttingDown) return;
+    if (this.reconnectTimer) return;
 
-  const loop = () => {
-    if (!bot || !bot.entity) return;
+    const delay = config.reconnectDelay || 10000;
+    log(this.tag, `⏳ Reconnecting in ${delay / 1000}s...`);
 
-    try {
-      const msgs = config.chatMessages;
-      const msg = msgs[Math.floor(Math.random() * msgs.length)];
-      bot.chat(msg);
-      log(`💬 [Random Chat] Sent: ${msg}`);
-    } catch (err) {
-      log('⚠️  Chat error: ' + err.message);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.createBot();
+    }, delay);
+  }
+
+  startAntiAFK() {
+    this.stopAntiAFK();
+
+    const min = config.moveIntervalMin || 5000;
+    const max = config.moveIntervalMax || 10000;
+
+    const loop = () => {
+      if (!this.bot || !this.bot.entity) return;
+
+      try {
+        const actions = ['forward', 'back', 'left', 'right', 'jump'];
+        const action = actions[Math.floor(Math.random() * actions.length)];
+
+        this.bot.setControlState(action, true);
+        setTimeout(() => {
+          if (this.bot && this.bot.entity) {
+            this.bot.setControlState(action, false);
+          }
+        }, 800 + Math.random() * 800);
+
+        const yaw = Math.random() * Math.PI * 2;
+        const pitch = (Math.random() - 0.5) * (Math.PI / 3);
+        this.bot.look(yaw, pitch, false).catch(() => {});
+
+        log(this.tag, `🏃 Action: ${action}`);
+      } catch (err) {
+        log(this.tag, '⚠️  Movement error: ' + err.message);
+      }
+
+      const nextDelay = min + Math.random() * (max - min);
+      this.moveTimer = setTimeout(loop, nextDelay);
+    };
+
+    this.moveTimer = setTimeout(loop, min);
+    log(this.tag, '🚀 Anti-AFK started.');
+  }
+
+  stopAntiAFK() {
+    if (this.moveTimer) {
+      clearTimeout(this.moveTimer);
+      this.moveTimer = null;
     }
+  }
 
-    const nextDelay = min + Math.random() * (max - min);
-    chatTimer = setTimeout(loop, nextDelay);
-  };
+  startRandomChat() {
+    this.stopRandomChat();
 
-  const firstDelay = min + Math.random() * (max - min);
-  chatTimer = setTimeout(loop, firstDelay);
-  log(`🚀 Random chat started (interval ${min / 1000}-${max / 1000}s).`);
-}
+    if (!config.randomChatEnabled) return;
+    if (!config.chatMessages || config.chatMessages.length === 0) return;
 
-function stopRandomChat() {
-  if (chatTimer) {
-    clearTimeout(chatTimer);
-    chatTimer = null;
+    const min = config.randomChatIntervalMin || 80000;
+    const max = config.randomChatIntervalMax || 90000;
+
+    const loop = () => {
+      if (!this.bot || !this.bot.entity) return;
+
+      try {
+        const msgs = config.chatMessages;
+        const msg = msgs[Math.floor(Math.random() * msgs.length)];
+        this.bot.chat(msg);
+        log(this.tag, `💬 [Random Chat] Sent: ${msg}`);
+      } catch (err) {
+        log(this.tag, '⚠️  Chat error: ' + err.message);
+      }
+
+      const nextDelay = min + Math.random() * (max - min);
+      this.chatTimer = setTimeout(loop, nextDelay);
+    };
+
+    const firstDelay = min + Math.random() * (max - min);
+    this.chatTimer = setTimeout(loop, firstDelay);
+    log(this.tag, `🚀 Random chat started (${min / 1000}-${max / 1000}s).`);
+  }
+
+  stopRandomChat() {
+    if (this.chatTimer) {
+      clearTimeout(this.chatTimer);
+      this.chatTimer = null;
+    }
+  }
+
+  shutdown(signal) {
+    log(this.tag, `🛑 ${signal} — shutting down`);
+    this.isShuttingDown = true;
+    this.stopAntiAFK();
+    this.stopRandomChat();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.bot) {
+      try { this.bot.quit('Shutting down'); } catch (_) {}
+    }
   }
 }
 
-// ── Health server (for Railway to keep container alive) ──
+// ── Create all bots ──
+const bots = config.servers.map((cfg, i) => {
+  log('MAIN', `📋 Server ${i + 1}: ${cfg.name || cfg.host}`);
+  return new ServerBot(cfg);
+});
+
+// ── Health server ──
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('MC AFK Bot is alive');
+  const status = bots.map(b => ({
+    server: b.tag,
+    connected: !!(b.bot && b.bot.entity),
+    username: b.cfg.username
+  }));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ bots: status, uptime: process.uptime() }, null, 2));
 }).listen(PORT, () => {
-  log(`🌐 Health server listening on port ${PORT}`);
+  log('MAIN', `🌐 Health server on port ${PORT}`);
 });
 
 // ── Graceful shutdown ──
-function shutdown(signal) {
-  log(`🛑 Received ${signal}. Shutting down...`);
-  isShuttingDown = true;
-  stopAntiAFK();
-  stopRandomChat();
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  if (bot) {
-    try { bot.quit('Shutting down'); } catch (_) {}
-  }
-  setTimeout(() => process.exit(0), 1500);
+function shutdownAll(signal) {
+  log('MAIN', `🛑 ${signal} received, shutting down all bots...`);
+  bots.forEach(b => b.shutdown(signal));
+  setTimeout(() => process.exit(0), 2000);
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdownAll('SIGINT'));
+process.on('SIGTERM', () => shutdownAll('SIGTERM'));
 process.on('uncaughtException', (err) => {
-  log('💥 Uncaught exception: ' + err.message);
-  log(err.stack);
+  log('MAIN', '💥 Uncaught: ' + err.message);
 });
 process.on('unhandledRejection', (reason) => {
-  log('💥 Unhandled rejection: ' + reason);
+  log('MAIN', '💥 Unhandled rejection: ' + reason);
 });
 
-// ── Start ──
-log('═══════════════════════════════════════');
-log('  Minecraft 24/7 AFK Bot');
-log('  Host: ' + config.host + ':' + config.port);
-log('  User: ' + config.username);
-log('  Auth: ' + config.auth);
-log('  Random Chat: ' + (config.randomChatEnabled ? 'ON' : 'OFF'));
-log('═══════════════════════════════════════');
-createBot();
+// ── Start all bots ──
+log('MAIN', '═══════════════════════════════════════');
+log('MAIN', `  Multi-Server AFK Bot — ${bots.length} servers`);
+log('MAIN', '═══════════════════════════════════════');
+bots.forEach(b => b.createBot());
