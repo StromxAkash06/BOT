@@ -1,41 +1,35 @@
 {
-  "host": "craftyhaven152.mcsh.gg",
-  "port": 25565,
-  "username": "Strom_me",
-  "password": "",
-  "auth": "offline",
-  "version": "1.20.1",
+  "servers": [
+    {
+      "name": "Server1",
+      "host": "craftyhaven152.mcsh.gg",
+      "port": 25565,
+      "username": "Strom_Me",
+      "password": "",
+      "auth": "offline",
+      "version": "1.20.1"
+    },
+    {
+      "name": "Server2",
+      "host": "forestmcm.mcsh.gg",
+      "port": 25565,
+      "username": "Strom_Me2",
+      "password": "",
+      "auth": "offline",
+      "version": "1.20.1"
+    }
+  ],
   "reconnectDelay": 10000,
   "spawnWarmup": 5000,
   "moveIntervalMin": 5000,
   "moveIntervalMax": 10000,
   "chatLogging": true,
-  "autoChatReply": false,
-  "chatReplyTrigger": "hi",
-  "chatReplyMessage": "Hello!",
   "randomChatEnabled": true,
   "randomChatIntervalMin": 80000,
   "randomChatIntervalMax": 90000,
   "chatMessages": [
-    "gg",
-    "nice",
-    "lol",
-    "anyone online?",
-    "brb",
-    "afk",
-    "hello everyone",
-    "whats up",
-    "lol nice",
-    "cool server",
-    "hi all",
-    "anyone wanna play?",
-    "this server is lit",
-    "yo",
-    "hey guys",
-    "lag?",
-    "im back",
-    "lets go",
-    "noice",
-    "xd"
+    "gg", "nice", "lol", "anyone online?", "brb", "afk",
+    "hello everyone", "whats up", "cool server", "hi all",
+    "yo", "hey guys", "im back", "lets go", "noice", "xd"
   ]
 }
